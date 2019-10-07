@@ -108,7 +108,6 @@ motionCounter = 0
 background_object = cv2.createBackgroundSubtractorMOG2(history=240, varThreshold=50, detectShadows=True)
 
 frame_array = []
-# out = cv2.VideoWriter('/home/pi/Desktop/vid.avi', cv2.VideoWriter_fourcc(*'DIVX'), 10.0, (500, 475))
 
 # capture frames from the camera
 rgb.set_color(GREEN)
@@ -221,6 +220,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
             elif button.is_pressed():
                 logger.info('Resuming ...')
                 rgb.set_color(GREEN)
+                background_object = cv2.createBackgroundSubtractorMOG2(history=240, varThreshold=50, detectShadows=True)
                 break
 
     if stop:
@@ -229,8 +229,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
 if conf['show_video']:
     cv2.destroyAllWindows()
 
-if len(frame_array) > 100:
-    task_queue.add_task(create_and_upload, frame_array)
+task_queue.add_task(create_and_upload, frame_array)
 task_queue.join()
 
 rgb.set_color(OFF)
