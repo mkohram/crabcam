@@ -4,7 +4,7 @@ from picamera import PiCamera
 import argparse
 import warnings
 import datetime
-# import dropbox
+import requests
 import imutils
 import json
 import time
@@ -18,9 +18,21 @@ import logging
 from squid import *
 from button import *
 import RPi.GPIO as GPIO
+import signal
+import sys
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
 logger = logging.getLogger('crabcam')
+
+# construct the argument parser and parse the arguments
+ap = argparse.ArgumentParser()
+ap.add_argument("-c", "--conf", required=True, help="path to the JSON configuration file")
+args = vars(ap.parse_args())
+
+# filter warnings, load the configuration and initialize the Dropbox
+# client
+warnings.filterwarnings("ignore")
+conf = json.load(open(args["conf"]))
 
 class LongPressButton(Button):
     def __init__(self, button_pin, debounce=0.05, long_press=5):
@@ -43,6 +55,19 @@ class LongPressButton(Button):
 
 rgb = Squid(18, 23, 24)
 button = LongPressButton(25, debounce=0.1, long_press=5)
+
+def turn_led_off(signum, frame):
+    logger.info("caught exit signal")
+    try:
+        rgb.set_color(OFF)
+    except Exception as e:
+        pass
+    sys.exit(0)
+    
+
+signal.signal(signal.SIGINT, turn_led_off)
+signal.signal(signal.SIGTERM, turn_led_off)
+
 rgb.set_color(RED)
 
 def create_video(frames):
@@ -53,7 +78,7 @@ def create_video(frames):
         video_path,
         cv2.VideoWriter_fourcc(*'DIVX'),
         10.0,
-        (500, 381)
+        (500, 620)
     )
 
     for i in range(len(frames)):
@@ -75,31 +100,29 @@ def create_and_upload(frames):
     upload_successful = upload_file(path, 'crabcam', f'videos/{filename}')
 
     if upload_successful:
+        slack_data = {'text': f"new file available at: http://crabcam.s3.amazonaws.com/videos/{filename}", "icon_emoji": ":hermes:"}
+        try:
+            response = requests.post(conf['slack_webhook'], data=json.dumps(slack_data), headers={'Content-Type': 'application/json'})
+        except Exception as e:
+            logger.error("failed to post to slack")
         logger.info(f'file uploaded to s3://crabcam/videos/{filename}')
         os.remove(path)
 
-# construct the argument parser and parse the arguments
-ap = argparse.ArgumentParser()
-ap.add_argument("-c", "--conf", required=True, help="path to the JSON configuration file")
-args = vars(ap.parse_args())
-
-# filter warnings, load the configuration and initialize the Dropbox
-# client
-warnings.filterwarnings("ignore")
-conf = json.load(open(args["conf"]))
 client = None
 
 task_queue = TaskQueue(1)
 
 # initialize the camera and grab a reference to the raw camera capture
 camera = PiCamera()
+camera.sensor_mode = 2
 camera.resolution = tuple(conf["resolution"])
 camera.framerate = conf["fps"]
+
 rawCapture = PiRGBArray(camera, size=tuple(conf["resolution"]))
 
 # allow the camera to warmup, then initialize the average frame, last
 # uploaded timestamp, and frame motion counter
-print("[INFO] warming up...")
+logger.info("warming up...")
 time.sleep(conf["camera_warmup_time"])
 avg = None
 lastUploaded = datetime.datetime.now()
@@ -116,18 +139,18 @@ stop = False
 for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     # grab the raw NumPy array representing the image and initialize
     # the timestamp and occupied/unoccupied text
-    frame = imutils.rotate(f.array, 180)
+    #frame = imutils.rotate(f.array, 180)
     timestamp = datetime.datetime.now()
     text = "IDLE"
 
     # resize the frame, convert it to grayscale, and blur it
-    frame = imutils.resize(frame, width=500)
+    frame = imutils.resize(f.array, width=500)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
     # if the average frame is None, initialize it
     if avg is None:
-        print("[INFO] starting background model...")
+        logger.info("starting background model...")
         avg = gray.copy().astype("float")
         rawCapture.truncate(0)
         continue
@@ -191,7 +214,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
         tr = imutils.resize(tfs, height=100)
         fr = imutils.resize(ffs, height=100)
 
-        output_frame = np.zeros((381, 500, 3), dtype="uint8")
+        output_frame = np.zeros((620, 500, 3), dtype="uint8")
         output_frame[:100, :tr.shape[1]] = tr
         output_frame[:100, (500-fr.shape[1]):] = fr
         # output_frame[:100, 300:] = fr

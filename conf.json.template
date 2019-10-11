@@ -1,0 +1,9 @@
+{
+	"slack_webhook": "<WEBHOOK HERE>",
+	"show_video": false,
+	"camera_warmup_time": 2.5,
+	"delta_thresh": 5,
+	"resolution": [1920, 2000],
+	"fps": 16,
+	"min_area": 1000
+}

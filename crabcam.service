@@ -1,0 +1,14 @@
+[Unit]
+Description=Big brother for the crabs
+After=guestnet.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=pi
+ExecStart=/home/pi/src/crabcam/env/bin/python /home/pi/src/crabcam/crabcam/crabcam.py -c /home/pi/src/crabcam/crabcam/conf.json
+
+[Install]
+WantedBy=multi-user.target

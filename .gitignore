@@ -2,6 +2,7 @@ node_modules
 .git
 .idea
 .sshyncignore
+conf.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

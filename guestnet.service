@@ -1,0 +1,16 @@
+[Unit]
+Description=Reconnect to the guest network upon disconnect
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=pi
+Environment="GPASS="
+Environment="SLACK_HOOK="
+ExecStart=/usr/local/bin/connect.sh
+
+[Install]
+WantedBy=multi-user.target
