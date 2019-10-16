@@ -177,7 +177,7 @@ frame_array = []
 
 # capture frames from the camera
 rgb.set_color(GREEN)
-first_frame_timestamp = time.time()
+latest_motion_timestamp = time.time()
 STOP = False
 for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     # grab the raw NumPy array representing the image and initialize
@@ -214,6 +214,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
     cnts = imutils.grab_contours(cnts)
 
     # loop over the contours
+    overlay = frame.copy()
     for c in cnts:
         # if the contour is too small, ignore it
         if cv2.contourArea(c) < conf["min_area"]:
@@ -226,7 +227,10 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
         tfs = np.stack((thresh, thresh, thresh), axis=2)
         ffs = np.stack((frameDelta, frameDelta, frameDelta), axis=2)
 
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame) 
+        # cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        
         cv2.rectangle(tfs, (x, y), (x + w, y + h), (0, 255, 0), 2)
         cv2.rectangle(ffs, (x, y), (x + w, y + h), (0, 255, 0), 2)
         text = "Motion"
@@ -260,16 +264,15 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
         output_frame = np.zeros((620, 500, 3), dtype="uint8")
         output_frame[:100, :tr.shape[1]] = tr
         output_frame[:100, (500-fr.shape[1]):] = fr
-        # output_frame[:100, 300:] = fr
         output_frame[100:, :] = frame
 
-        if len(frame_array) == 0:
-            first_frame_timestamp = time.time()
+        latest_motion_timestamp = time.time()
 
         frame_array.append(output_frame)
 
-    if len(frame_array) > 300:
+    if (len(frame_array) > 300 and ((time.time() - latest_motion_timestamp) > 30)) or len(frame_array) > 1200:
         task_queue.add_task(create_and_upload, frame_array)
+        latest_motion_timestamp = time.time()
         frame_array = []
 
     if button.is_pressed():
