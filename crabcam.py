@@ -20,8 +20,9 @@ from button import *
 import RPi.GPIO as GPIO
 import signal
 import sys
+import subprocess
 
-logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
+logging.basicConfig(level=os.environ.get("LOGLEVEL", "DEBUG"))
 logger = logging.getLogger('crabcam')
 
 # construct the argument parser and parse the arguments
@@ -56,17 +57,26 @@ class LongPressButton(Button):
 rgb = Squid(18, 23, 24)
 button = LongPressButton(25, debounce=0.1, long_press=5)
 
-def turn_led_off(signum, frame):
-    logger.info("caught exit signal")
+def clean_up(signal, frame):
+    global STOP
     try:
+        STOP = True
+        time.sleep(5)
+        if conf['show_video']:
+            cv2.destroyAllWindows()
+        
+        task_queue.add_task(create_and_upload, frame_array)
+        task_queue.join(timeout=10)
+        
         rgb.set_color(OFF)
+        camera.close()
     except Exception as e:
         pass
     sys.exit(0)
     
 
-signal.signal(signal.SIGINT, turn_led_off)
-signal.signal(signal.SIGTERM, turn_led_off)
+signal.signal(signal.SIGINT, clean_up)
+signal.signal(signal.SIGTERM, clean_up)
 
 rgb.set_color(RED)
 
@@ -77,7 +87,7 @@ def create_video(frames):
     out = cv2.VideoWriter(
         video_path,
         cv2.VideoWriter_fourcc(*'DIVX'),
-        10.0,
+        conf["fps"],
         (500, 620)
     )
 
@@ -89,6 +99,7 @@ def create_video(frames):
 
     return video_path
 
+
 def create_and_upload(frames):
     if len(frames) < 50:
         logger.info('Video too short. Not saving.')
@@ -96,17 +107,49 @@ def create_and_upload(frames):
 
     path = create_video(frames)
     filename = path.split('/')[-1]
-    logger.info(f'temp video created at {path}')
-    upload_successful = upload_file(path, 'crabcam', f'videos/{filename}')
+
+    logger.info(f'temp video created at {path}. converting to mp4.')
+    mp4_path = f'{path[:-4]}.mp4'
+    mp4_filename = mp4_path.split('/')[-1]
+    proc = subprocess.Popen(f'ffmpeg -i {path} {mp4_path}', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    proc.wait()
+
+    if proc.returncode == 0:
+        logger.info(f"successfully converted to mp4 at {mp4_filename}")
+        upload_filename = mp4_filename
+        # upload_successful = upload_file(mp4_path, 'crabcam', f'videos/{mp4_filename}')
+        # slack_data = {'text': f"new file available at: http://crabcam.s3.amazonaws.com/videos/{mp4_filename}", "icon_emoji": ":hermes:"}
+    else:
+        logger.warn("mp4 conversion failed")
+        upload_filename = filename
+        # upload_successful = upload_file(path, 'crabcam', f'videos/{filename}')
+        # slack_data = {'text': f"new file available at: http://crabcam.s3.amazonaws.com/videos/{filename}", "icon_emoji": ":hermes:"}
+    upload_successful = False
+    count = 0
+    while True:
+        upload_successful = upload_file(mp4_path, 'crabcam', f'videos/{upload_filename}')
+        if upload_successful:
+            slack_data = {'text': f"new file available at: http://crabcam.s3.amazonaws.com/videos/{upload_filename}", "icon_emoji": ":hermes:"}
+            break
+        
+        count += 1
+        if count > 50:
+            logger.error('giving up on upload after 50 attempts')
+            break
+
+        logger.info('retrying upload in 15 seconds')
+        time.sleep(15)
 
     if upload_successful:
-        slack_data = {'text': f"new file available at: http://crabcam.s3.amazonaws.com/videos/{filename}", "icon_emoji": ":hermes:"}
         try:
             response = requests.post(conf['slack_webhook'], data=json.dumps(slack_data), headers={'Content-Type': 'application/json'})
         except Exception as e:
             logger.error("failed to post to slack")
         logger.info(f'file uploaded to s3://crabcam/videos/{filename}')
         os.remove(path)
+        os.remove(mp4_path)
+    else:
+        logger.warn('failed to upload to s3')
 
 client = None
 
@@ -114,7 +157,7 @@ task_queue = TaskQueue(1)
 
 # initialize the camera and grab a reference to the raw camera capture
 camera = PiCamera()
-camera.sensor_mode = 2
+camera.sensor_mode = 4
 camera.resolution = tuple(conf["resolution"])
 camera.framerate = conf["fps"]
 
@@ -135,7 +178,7 @@ frame_array = []
 # capture frames from the camera
 rgb.set_color(GREEN)
 first_frame_timestamp = time.time()
-stop = False
+STOP = False
 for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     # grab the raw NumPy array representing the image and initialize
     # the timestamp and occupied/unoccupied text
@@ -205,7 +248,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
 
         # if the `q` key is pressed, break from the lop
         if key == ord("q"):
-            stop = True
+            STOP = True
 
     # clear the stream in preparation for the next frame
     rawCapture.truncate(0)
@@ -225,7 +268,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
 
         frame_array.append(output_frame)
 
-    if len(frame_array) > 300 or ((time.time() - first_frame_timestamp) > 2 * 3600):
+    if len(frame_array) > 300:
         task_queue.add_task(create_and_upload, frame_array)
         frame_array = []
 
@@ -238,7 +281,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
             if button.is_long_press():
                 logger.info('stoping ...')
                 rgb.set_color(RED)
-                stop = True
+                STOP = True
                 break
             elif button.is_pressed():
                 logger.info('Resuming ...')
@@ -246,14 +289,5 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
                 background_object = cv2.createBackgroundSubtractorMOG2(history=240, varThreshold=50, detectShadows=True)
                 break
 
-    if stop:
+    if STOP:
         break
-
-if conf['show_video']:
-    cv2.destroyAllWindows()
-
-task_queue.add_task(create_and_upload, frame_array)
-task_queue.join()
-
-rgb.set_color(OFF)
-
