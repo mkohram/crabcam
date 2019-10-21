@@ -21,6 +21,7 @@ import RPi.GPIO as GPIO
 import signal
 import sys
 import subprocess
+from twitchstream.outputvideo import TwitchBufferedOutputStream
 
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "DEBUG"))
 logger = logging.getLogger('crabcam')
@@ -70,6 +71,7 @@ def clean_up(signal, frame):
         
         rgb.set_color(OFF)
         camera.close()
+        # twitch_video_stream.__exit__(None, None, None)	
     except Exception as e:
         pass
     sys.exit(0)
@@ -178,7 +180,15 @@ frame_array = []
 # capture frames from the camera
 rgb.set_color(GREEN)
 latest_motion_timestamp = time.time()
+latest_upload = time.time()
 STOP = False
+# twitch_video_stream = TwitchBufferedOutputStream(
+#             twitch_stream_key='',
+#             width=500,
+#             height=520,
+#             fps=10,
+#             enable_audio=False,
+#             verbose=True)
 for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     # grab the raw NumPy array representing the image and initialize
     # the timestamp and occupied/unoccupied text
@@ -270,10 +280,18 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
 
         frame_array.append(output_frame)
 
+    # if twitch_video_stream.get_video_frame_buffer_state() < 100:
+    #     twitch_video_stream.send_video_frame(frame)
+
     if (len(frame_array) > 300 and ((time.time() - latest_motion_timestamp) > 30)) or len(frame_array) > 1200:
         task_queue.add_task(create_and_upload, frame_array)
         latest_motion_timestamp = time.time()
+        latest_upload = time.time()
         frame_array = []
+
+    if (time.time() - latest_upload) > (12 * 3600):
+        logger.warn("Too long since last upload. triggering a restart")
+        clean_up(None, None)
 
     if button.is_pressed():
         logger.info("Pausing ...")
