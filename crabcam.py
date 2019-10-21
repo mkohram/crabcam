@@ -67,7 +67,8 @@ def clean_up(signal, frame):
             cv2.destroyAllWindows()
         
         task_queue.add_task(create_and_upload, frame_array)
-        task_queue.join(timeout=10)
+        time.sleep(10)
+        task_queue.join()
         
         rgb.set_color(OFF)
         camera.close()

@@ -29,9 +29,9 @@ class TaskQueue(queue.Queue):
     def worker(self):
         try:
             while True:
-                # tupl = self.get()
                 item, args, kwargs = self.get()
                 item(*args, **kwargs)
+                logger.info('task finished')
                 self.task_done()
         except Exception as e:
             # TODO need to do some reporting here
