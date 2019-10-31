@@ -37,6 +37,17 @@ class TaskQueue(queue.Queue):
             # TODO need to do some reporting here
             pass
 
+    def join_with_timeout(self, timeout):
+        self.all_tasks_done.acquire()
+        try:
+            endtime = time.time() + timeout
+            while self.unfinished_tasks:
+                remaining = endtime - time.time()
+                if remaining <= 0.0:
+                    raise NotFinished
+                self.all_tasks_done.wait(remaining)
+        finally:
+            self.all_tasks_done.release()
 
 def tests():
     def blokkah(*args, **kwargs):

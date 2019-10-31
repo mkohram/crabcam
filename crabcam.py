@@ -68,7 +68,7 @@ def clean_up(signal, frame):
         
         task_queue.add_task(create_and_upload, frame_array)
         time.sleep(10)
-        task_queue.join()
+        task_queue.join_with_timeout(600)
         
         rgb.set_color(OFF)
         camera.close()
