@@ -290,7 +290,7 @@ for f in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True
         latest_upload = time.time()
         frame_array = []
 
-    if (time.time() - latest_upload) > (12 * 3600):
+    if (time.time() - latest_upload) > (3 * 3600):
         logger.warn("Too long since last upload. triggering a restart")
         clean_up(None, None)
 
